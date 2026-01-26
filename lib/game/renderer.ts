@@ -176,11 +176,56 @@ function drawMenu(ctx: CanvasRenderingContext2D, state: GameState): void {
   ctx.font = '12px Arial';
   ctx.fillText(`Highest Level Unlocked: ${state.highestLevel}`, centerX, levelY + 110);
 
+  // === RIGHT PANEL: KEYBINDS ===
+  const rightPanelX = width - 240;
+  ctx.fillStyle = NEON_COLORS.orange;
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText('KEYBINDS', rightPanelX, 160);
+
+  const keybindStartY = 180;
+  const keybindH = 50;
+  const keybindW = 200;
+  const keybindSpacing = 8;
+  const laneNames = ['Lane 1', 'Lane 2', 'Lane 3', 'Lane 4'];
+
+  for (let i = 0; i < state.keybinds.length; i++) {
+    const btnY = keybindStartY + i * (keybindH + keybindSpacing);
+    const isRebinding = state.rebindingLane === i;
+
+    // Button background
+    ctx.fillStyle = isRebinding ? 'rgba(255, 136, 0, 0.3)' : 'rgba(255, 255, 255, 0.1)';
+    ctx.fillRect(rightPanelX, btnY, keybindW, keybindH);
+
+    // Border
+    ctx.strokeStyle = isRebinding ? NEON_COLORS.orange : state.lanes[i].color;
+    ctx.lineWidth = isRebinding ? 3 : 2;
+    ctx.strokeRect(rightPanelX, btnY, keybindW, keybindH);
+
+    // Lane name
+    ctx.fillStyle = state.lanes[i].color;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(laneNames[i], rightPanelX + 10, btnY + 22);
+
+    // Current key or "Press any key"
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'right';
+    if (isRebinding) {
+      ctx.fillStyle = NEON_COLORS.orange;
+      ctx.fillText('Press key...', rightPanelX + keybindW - 10, btnY + 32);
+    } else {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(state.keybinds[i], rightPanelX + keybindW - 10, btnY + 32);
+    }
+  }
+
   // Controls hint
   ctx.fillStyle = '#555';
   ctx.font = '14px Arial';
+  ctx.textAlign = 'center';
   ctx.fillText('SPACE to play | W/S or Arrows to change level', centerX, height - 60);
-  ctx.fillText('D, F, J, K to hit notes | ESC to pause', centerX, height - 40);
+  ctx.fillText(`${state.keybinds.join(', ')} to hit notes | ESC to pause`, centerX, height - 40);
 }
 
 function drawGameplay(ctx: CanvasRenderingContext2D, state: GameState, config: GameConfig, levelConfig: LevelConfig | null): void {

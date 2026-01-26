@@ -28,6 +28,7 @@ interface SaveData {
   upgrades: { id: string; level: number }[];
   levelHighScores: [number, number][];
   levelMaxCombos: [number, number][];
+  keybinds?: string[];
 }
 
 export class GameEngine {
@@ -91,6 +92,8 @@ export class GameEngine {
       beatPulse: 0,
       levelHighScores: new Map(),
       levelMaxCombos: new Map(),
+      keybinds: [...LANE_KEYS],
+      rebindingLane: null,
     };
 
     // Load saved progress
@@ -241,8 +244,21 @@ export class GameEngine {
   private handleKeyDown(e: KeyboardEvent): void {
     const key = e.key.toUpperCase();
 
+    // Handle keybind rebinding
+    if (this.state.rebindingLane !== null) {
+      e.preventDefault();
+      if (e.key !== 'Escape') {
+        // Set the new keybind
+        this.state.keybinds[this.state.rebindingLane] = key;
+        this.state.lanes[this.state.rebindingLane].key = key;
+        this.saveProgress();
+      }
+      this.state.rebindingLane = null;
+      return;
+    }
+
     if (this.state.screen === 'playing') {
-      const laneIndex = LANE_KEYS.indexOf(key);
+      const laneIndex = this.state.keybinds.indexOf(key);
       if (laneIndex !== -1 && !this.state.lanes[laneIndex].pressed) {
         this.state.lanes[laneIndex].pressed = true;
         this.tryHitNote(laneIndex);
@@ -268,7 +284,7 @@ export class GameEngine {
 
   private handleKeyUp(e: KeyboardEvent): void {
     const key = e.key.toUpperCase();
-    const laneIndex = LANE_KEYS.indexOf(key);
+    const laneIndex = this.state.keybinds.indexOf(key);
     if (laneIndex !== -1) {
       this.state.lanes[laneIndex].pressed = false;
     }
@@ -289,6 +305,7 @@ export class GameEngine {
   private handleMenuClick(x: number, y: number): void {
     const centerX = this.canvas.width / 2;
     const leftPanelX = 40;
+    const rightPanelX = this.canvas.width - 240;
 
     // Check PLAY button (center)
     const playBtnY = 280;
@@ -337,6 +354,23 @@ export class GameEngine {
             this.addFloatingText(leftPanelX + upgradeW / 2, btnY, 'Need more points!', NEON_COLORS.red, 0.8);
           }
         }
+        return;
+      }
+    }
+
+    // Check keybind buttons (right panel)
+    const keybindStartY = 180;
+    const keybindH = 50;
+    const keybindW = 200;
+    const keybindSpacing = 8;
+
+    for (let i = 0; i < this.state.keybinds.length; i++) {
+      const btnY = keybindStartY + i * (keybindH + keybindSpacing);
+
+      if (x >= rightPanelX && x <= rightPanelX + keybindW &&
+          y >= btnY && y <= btnY + keybindH) {
+        // Start rebinding this lane
+        this.state.rebindingLane = i;
         return;
       }
     }
@@ -595,6 +629,7 @@ export class GameEngine {
         upgrades: this.state.upgrades.map(u => ({ id: u.id, level: u.currentLevel })),
         levelHighScores: Array.from(this.state.levelHighScores.entries()),
         levelMaxCombos: Array.from(this.state.levelMaxCombos.entries()),
+        keybinds: this.state.keybinds,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
     } catch (e) {
@@ -623,6 +658,14 @@ export class GameEngine {
       }
       if (data.levelMaxCombos) {
         this.state.levelMaxCombos = new Map(data.levelMaxCombos);
+      }
+
+      // Load keybinds and sync to lanes
+      if (data.keybinds && data.keybinds.length === this.config.laneCount) {
+        this.state.keybinds = data.keybinds;
+        for (let i = 0; i < this.state.lanes.length; i++) {
+          this.state.lanes[i].key = data.keybinds[i];
+        }
       }
     } catch (e) {
       console.warn('Failed to load progress:', e);

@@ -108,6 +108,8 @@ export interface GameState {
   beatPulse: number;
   levelHighScores: Map<number, number>;
   levelMaxCombos: Map<number, number>;
+  keybinds: string[];  // Custom keys for lanes
+  rebindingLane: number | null;  // Which lane is being rebound (-1 = none)
 }
 
 export interface LevelConfig {
