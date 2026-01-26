@@ -5,7 +5,7 @@ import {
   Note,
   NoteType,
   Lane,
-  Level,
+  LevelConfig,
   Upgrade,
   HitRating,
   Particle,
@@ -16,16 +16,18 @@ import {
   NEON_COLORS,
 } from '../types';
 import { render } from './renderer';
-import { generateLevels } from './levels';
+import { generateLevel } from './levels';
 
 let noteIdCounter = 0;
 
-const SAVE_KEY = 'combo_surge_save';
+const SAVE_KEY = 'combo_surge_save_v2';
 
 interface SaveData {
   totalPoints: number;
+  highestLevel: number;
   upgrades: { id: string; level: number }[];
-  levels: { id: number; unlocked: boolean; highScore: number; maxCombo: number }[];
+  levelHighScores: [number, number][];
+  levelMaxCombos: [number, number][];
 }
 
 export class GameEngine {
@@ -38,6 +40,7 @@ export class GameEngine {
   private keyDownHandler: (e: KeyboardEvent) => void;
   private keyUpHandler: (e: KeyboardEvent) => void;
   private clickHandler: (e: MouseEvent) => void;
+  private currentLevelConfig: LevelConfig | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -71,7 +74,8 @@ export class GameEngine {
     // Initialize game state
     this.state = {
       screen: 'menu',
-      currentLevel: null,
+      currentLevelNum: 1,
+      highestLevel: 1,
       gameTime: 0,
       notes: [],
       lanes,
@@ -81,11 +85,12 @@ export class GameEngine {
       floatingTexts: [],
       totalPoints: 0,
       upgrades,
-      levels: generateLevels(),
       isPaused: false,
       hitWindow: this.config.baseHitWindow,
       noteSpeed: this.config.baseNoteSpeed,
       beatPulse: 0,
+      levelHighScores: new Map(),
+      levelMaxCombos: new Map(),
     };
 
     // Load saved progress
@@ -138,7 +143,7 @@ export class GameEngine {
     this.lastTime = currentTime;
 
     this.update(deltaTime);
-    render(this.ctx, this.state, this.config);
+    render(this.ctx, this.state, this.config, this.currentLevelConfig);
 
     this.animationId = requestAnimationFrame(this.gameLoop);
   };
@@ -167,8 +172,8 @@ export class GameEngine {
   }
 
   private updateGameplay(deltaTime: number): void {
-    const level = this.state.currentLevel;
-    if (!level) return;
+    const levelConfig = this.currentLevelConfig;
+    if (!levelConfig) return;
 
     this.state.gameTime += deltaTime;
 
@@ -181,11 +186,10 @@ export class GameEngine {
     const hitLineY = this.canvas.height * this.config.hitLineY;
     const travelTime = hitLineY / effectiveSpeed;
 
-    for (const pattern of level.patterns) {
-      const patternTime = pattern.time * level.duration;
+    for (const pattern of levelConfig.patterns) {
+      const patternTime = pattern.time * levelConfig.duration;
       const spawnTime = patternTime - travelTime;
 
-      // Check if we should spawn this pattern
       if (this.state.gameTime >= spawnTime && this.state.gameTime < spawnTime + deltaTime) {
         for (const laneIndex of pattern.lanes) {
           if (laneIndex >= 0 && laneIndex < this.config.laneCount) {
@@ -211,7 +215,6 @@ export class GameEngine {
       if (!note.hit && !note.missed) {
         note.y += effectiveSpeed * deltaTime;
 
-        // Check if note is missed (passed the hit line by too much)
         const hitLineY = this.canvas.height * this.config.hitLineY;
         if (note.y > hitLineY + 50) {
           this.missNote(note);
@@ -223,14 +226,14 @@ export class GameEngine {
     this.state.notes = this.state.notes.filter(n => n.y < this.canvas.height + 50);
 
     // Update beat pulse based on BPM
-    const beatInterval = 60 / level.bpm;
+    const beatInterval = 60 / levelConfig.bpm;
     const beatPhase = (this.state.gameTime % beatInterval) / beatInterval;
     if (beatPhase < 0.1) {
       this.state.beatPulse = Math.max(this.state.beatPulse, 1 - beatPhase * 10);
     }
 
     // Check if level is complete
-    if (this.state.gameTime >= level.duration + 2) {
+    if (this.state.gameTime >= levelConfig.duration + 2) {
       this.endLevel();
     }
   }
@@ -239,27 +242,24 @@ export class GameEngine {
     const key = e.key.toUpperCase();
 
     if (this.state.screen === 'playing') {
-      // Check if it's a lane key
       const laneIndex = LANE_KEYS.indexOf(key);
       if (laneIndex !== -1 && !this.state.lanes[laneIndex].pressed) {
         this.state.lanes[laneIndex].pressed = true;
         this.tryHitNote(laneIndex);
       }
 
-      // Escape to pause
       if (e.key === 'Escape') {
         this.state.isPaused = !this.state.isPaused;
       }
     } else if (this.state.screen === 'menu') {
-      // Space to start first unlocked level
       if (e.key === ' ') {
-        const firstLevel = this.state.levels.find(l => l.unlocked);
-        if (firstLevel) {
-          this.startLevel(firstLevel);
-        }
+        this.startLevel(this.state.currentLevelNum);
+      } else if (e.key === 'ArrowUp' || key === 'W') {
+        this.state.currentLevelNum = Math.min(this.state.currentLevelNum + 1, this.state.highestLevel);
+      } else if (e.key === 'ArrowDown' || key === 'S') {
+        this.state.currentLevelNum = Math.max(1, this.state.currentLevelNum - 1);
       }
     } else if (this.state.screen === 'results') {
-      // Space to return to menu
       if (e.key === ' ') {
         this.state.screen = 'menu';
       }
@@ -282,94 +282,77 @@ export class GameEngine {
     if (this.state.screen === 'menu') {
       this.handleMenuClick(x, y);
     } else if (this.state.screen === 'results') {
-      // Click anywhere to continue
       this.state.screen = 'menu';
-    } else if (this.state.screen === 'upgrades') {
-      this.handleUpgradeClick(x, y);
     }
   }
 
   private handleMenuClick(x: number, y: number): void {
     const centerX = this.canvas.width / 2;
-    const startY = 280;
-    const buttonHeight = 60;
-    const buttonWidth = 300;
-    const spacing = 20;
+    const leftPanelX = 40;
 
-    // Check level buttons
-    for (let i = 0; i < this.state.levels.length; i++) {
-      const level = this.state.levels[i];
-      const btnY = startY + i * (buttonHeight + spacing);
-      const btnX = centerX - buttonWidth / 2;
-
-      if (x >= btnX && x <= btnX + buttonWidth && y >= btnY && y <= btnY + buttonHeight) {
-        if (level.unlocked) {
-          this.startLevel(level);
-        } else if (this.state.totalPoints >= level.unlockCost) {
-          // Unlock the level
-          this.state.totalPoints -= level.unlockCost;
-          level.unlocked = true;
-          this.saveProgress();
-        }
-        return;
-      }
+    // Check PLAY button (center)
+    const playBtnY = 280;
+    const playBtnW = 250;
+    const playBtnH = 60;
+    if (x >= centerX - playBtnW / 2 && x <= centerX + playBtnW / 2 &&
+        y >= playBtnY && y <= playBtnY + playBtnH) {
+      this.startLevel(this.state.currentLevelNum);
+      return;
     }
 
-    // Check upgrades button
-    const upgradeBtnY = startY + this.state.levels.length * (buttonHeight + spacing) + 20;
-    const upgradeBtnX = centerX - buttonWidth / 2;
-    if (x >= upgradeBtnX && x <= upgradeBtnX + buttonWidth && y >= upgradeBtnY && y <= upgradeBtnY + buttonHeight) {
-      this.state.screen = 'upgrades';
+    // Check level navigation arrows
+    const arrowY = 370;
+    const arrowSize = 40;
+    // Left arrow (decrease level)
+    if (x >= centerX - 100 && x <= centerX - 60 && y >= arrowY && y <= arrowY + arrowSize) {
+      this.state.currentLevelNum = Math.max(1, this.state.currentLevelNum - 1);
+      return;
     }
-  }
+    // Right arrow (increase level)
+    if (x >= centerX + 60 && x <= centerX + 100 && y >= arrowY && y <= arrowY + arrowSize) {
+      this.state.currentLevelNum = Math.min(this.state.currentLevelNum + 1, this.state.highestLevel);
+      return;
+    }
 
-  private handleUpgradeClick(x: number, y: number): void {
-    const centerX = this.canvas.width / 2;
-    const startY = 180;
-    const buttonHeight = 70;
-    const buttonWidth = 400;
-    const spacing = 15;
+    // Check upgrade buttons (left panel)
+    const upgradeStartY = 180;
+    const upgradeH = 50;
+    const upgradeW = 200;
+    const upgradeSpacing = 8;
 
-    // Check upgrade buttons
     for (let i = 0; i < this.state.upgrades.length; i++) {
       const upgrade = this.state.upgrades[i];
-      const btnY = startY + i * (buttonHeight + spacing);
-      const btnX = centerX - buttonWidth / 2;
+      const btnY = upgradeStartY + i * (upgradeH + upgradeSpacing);
 
-      if (x >= btnX && x <= btnX + buttonWidth && y >= btnY && y <= btnY + buttonHeight) {
+      if (x >= leftPanelX && x <= leftPanelX + upgradeW &&
+          y >= btnY && y <= btnY + upgradeH) {
         if (upgrade.currentLevel < upgrade.maxLevel) {
           const cost = this.getUpgradeCost(upgrade);
           if (this.state.totalPoints >= cost) {
             this.state.totalPoints -= cost;
             upgrade.currentLevel++;
+            this.addFloatingText(leftPanelX + upgradeW / 2, btnY, 'UPGRADED!', NEON_COLORS.green, 1);
             this.saveProgress();
+          } else {
+            this.addFloatingText(leftPanelX + upgradeW / 2, btnY, 'Need more points!', NEON_COLORS.red, 0.8);
           }
         }
         return;
       }
     }
-
-    // Check back button
-    const backBtnY = startY + this.state.upgrades.length * (buttonHeight + spacing) + 20;
-    const backBtnX = centerX - 100;
-    if (x >= backBtnX && x <= backBtnX + 200 && y >= backBtnY && y <= backBtnY + 50) {
-      this.state.screen = 'menu';
-    }
   }
 
-  private getUpgradeCost(upgrade: Upgrade): number {
-    return Math.floor(upgrade.cost * Math.pow(1.5, upgrade.currentLevel));
+  getUpgradeCost(upgrade: Upgrade): number {
+    return Math.floor(upgrade.baseCost * Math.pow(1.5, upgrade.currentLevel));
   }
 
   private tryHitNote(laneIndex: number): void {
     const hitLineY = this.canvas.height * this.config.hitLineY;
 
-    // Apply timing upgrade
     const timingUpgrade = this.state.upgrades.find(u => u.id === 'timing');
     const windowMultiplier = timingUpgrade ? 1 + (timingUpgrade.currentLevel * timingUpgrade.effect) : 1;
     const effectiveWindow = this.config.baseHitWindow * windowMultiplier;
 
-    // Find the closest note in this lane that can be hit
     let closestNote: Note | null = null;
     let closestDist = Infinity;
 
@@ -386,7 +369,6 @@ export class GameEngine {
     if (closestNote) {
       this.hitNote(closestNote, closestDist);
     } else {
-      // Pressed with no note nearby - could add a penalty here
       this.state.lanes[laneIndex].hitEffect = 0.3;
     }
   }
@@ -394,7 +376,6 @@ export class GameEngine {
   private hitNote(note: Note, distance: number): void {
     note.hit = true;
 
-    // Determine rating based on timing
     let rating: HitRating;
     let baseScore: number;
 
@@ -426,7 +407,6 @@ export class GameEngine {
       scoreMultiplier += boostUpgrade.currentLevel * boostUpgrade.effect;
     }
 
-    // Perfect bonus
     if (rating === HitRating.Perfect) {
       const perfectUpgrade = this.state.upgrades.find(u => u.id === 'perfect_bonus');
       if (perfectUpgrade) {
@@ -442,10 +422,8 @@ export class GameEngine {
     lane.hitEffect = 1;
     this.state.beatPulse = Math.min(1, this.state.beatPulse + 0.3);
 
-    // Spawn particles
     this.spawnHitParticles(lane.x + lane.width / 2, this.canvas.height * this.config.hitLineY, lane.color);
 
-    // Floating text
     const ratingColors: Record<HitRating, string> = {
       [HitRating.Perfect]: NEON_COLORS.yellow,
       [HitRating.Great]: NEON_COLORS.cyan,
@@ -461,7 +439,6 @@ export class GameEngine {
       rating === HitRating.Perfect ? 1.5 : 1
     );
 
-    // Show score
     this.addFloatingText(
       lane.x + lane.width / 2,
       this.canvas.height * this.config.hitLineY - 70,
@@ -476,12 +453,10 @@ export class GameEngine {
     note.rating = HitRating.Miss;
     this.state.score.missCount++;
 
-    // Check combo shield
     const shieldUpgrade = this.state.upgrades.find(u => u.id === 'combo_shield');
     const shieldChance = shieldUpgrade ? shieldUpgrade.currentLevel * shieldUpgrade.effect : 0;
 
     if (Math.random() < shieldChance) {
-      // Combo saved!
       this.addFloatingText(
         this.canvas.width / 2,
         this.canvas.height / 2,
@@ -504,10 +479,11 @@ export class GameEngine {
     );
   }
 
-  private startLevel(level: Level): void {
-    this.state.currentLevel = { ...level };
+  private startLevel(levelNum: number): void {
+    this.currentLevelConfig = generateLevel(levelNum);
+    this.state.currentLevelNum = levelNum;
     this.state.screen = 'playing';
-    this.state.gameTime = -2; // Countdown before start
+    this.state.gameTime = -2;
     this.state.notes = [];
     this.state.combo = { current: 0, max: 0, multiplier: 1 };
     this.state.score = { current: 0, display: 0, perfectCount: 0, greatCount: 0, goodCount: 0, missCount: 0 };
@@ -515,25 +491,30 @@ export class GameEngine {
   }
 
   private endLevel(): void {
-    const level = this.state.currentLevel;
-    if (!level) return;
+    const levelNum = this.state.currentLevelNum;
 
-    // Update level stats
-    const levelData = this.state.levels.find(l => l.id === level.id);
-    if (levelData) {
-      if (this.state.score.current > levelData.highScore) {
-        levelData.highScore = this.state.score.current;
-      }
-      if (this.state.combo.max > levelData.maxCombo) {
-        levelData.maxCombo = this.state.combo.max;
-      }
+    // Update high scores
+    const currentHigh = this.state.levelHighScores.get(levelNum) || 0;
+    if (this.state.score.current > currentHigh) {
+      this.state.levelHighScores.set(levelNum, this.state.score.current);
     }
 
-    // Award points (score / 10)
+    const currentMaxCombo = this.state.levelMaxCombos.get(levelNum) || 0;
+    if (this.state.combo.max > currentMaxCombo) {
+      this.state.levelMaxCombos.set(levelNum, this.state.combo.max);
+    }
+
+    // Unlock next level
+    if (levelNum >= this.state.highestLevel) {
+      this.state.highestLevel = levelNum + 1;
+    }
+
+    // Award points
     const pointsEarned = Math.floor(this.state.score.current / 10);
     this.state.totalPoints += pointsEarned;
 
     this.state.screen = 'results';
+    this.currentLevelConfig = null;
     this.saveProgress();
   }
 
@@ -572,7 +553,7 @@ export class GameEngine {
       const p = this.state.particles[i];
       p.x += p.vx * deltaTime;
       p.y += p.vy * deltaTime;
-      p.vy += 200 * deltaTime; // Gravity
+      p.vy += 200 * deltaTime;
       p.life -= deltaTime;
 
       if (p.life <= 0) {
@@ -580,7 +561,6 @@ export class GameEngine {
       }
     }
 
-    // Cap particles
     while (this.state.particles.length > 200) {
       this.state.particles.shift();
     }
@@ -599,7 +579,6 @@ export class GameEngine {
   }
 
   private updateDisplayScore(deltaTime: number): void {
-    // Animate display score towards actual score
     const diff = this.state.score.current - this.state.score.display;
     if (Math.abs(diff) < 1) {
       this.state.score.display = this.state.score.current;
@@ -612,13 +591,10 @@ export class GameEngine {
     try {
       const saveData: SaveData = {
         totalPoints: this.state.totalPoints,
+        highestLevel: this.state.highestLevel,
         upgrades: this.state.upgrades.map(u => ({ id: u.id, level: u.currentLevel })),
-        levels: this.state.levels.map(l => ({
-          id: l.id,
-          unlocked: l.unlocked,
-          highScore: l.highScore,
-          maxCombo: l.maxCombo,
-        })),
+        levelHighScores: Array.from(this.state.levelHighScores.entries()),
+        levelMaxCombos: Array.from(this.state.levelMaxCombos.entries()),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
     } catch (e) {
@@ -633,8 +609,8 @@ export class GameEngine {
 
       const data: SaveData = JSON.parse(saved);
       this.state.totalPoints = data.totalPoints || 0;
+      this.state.highestLevel = data.highestLevel || 1;
 
-      // Restore upgrades
       for (const savedUpgrade of data.upgrades || []) {
         const upgrade = this.state.upgrades.find(u => u.id === savedUpgrade.id);
         if (upgrade) {
@@ -642,14 +618,11 @@ export class GameEngine {
         }
       }
 
-      // Restore level progress
-      for (const savedLevel of data.levels || []) {
-        const level = this.state.levels.find(l => l.id === savedLevel.id);
-        if (level) {
-          level.unlocked = savedLevel.unlocked;
-          level.highScore = savedLevel.highScore;
-          level.maxCombo = savedLevel.maxCombo;
-        }
+      if (data.levelHighScores) {
+        this.state.levelHighScores = new Map(data.levelHighScores);
+      }
+      if (data.levelMaxCombos) {
+        this.state.levelMaxCombos = new Map(data.levelMaxCombos);
       }
     } catch (e) {
       console.warn('Failed to load progress:', e);

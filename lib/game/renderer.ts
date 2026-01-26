@@ -1,9 +1,11 @@
-import { GameState, GameConfig, Note, Lane, HitRating, NEON_COLORS } from '../types';
+import { GameState, GameConfig, Note, Lane, HitRating, LevelConfig, NEON_COLORS } from '../types';
+import { getLevelName, generateLevel } from './levels';
 
 export function render(
   ctx: CanvasRenderingContext2D,
   state: GameState,
-  config: GameConfig
+  config: GameConfig,
+  levelConfig: LevelConfig | null
 ): void {
   const { width, height } = ctx.canvas;
 
@@ -17,13 +19,10 @@ export function render(
       drawMenu(ctx, state);
       break;
     case 'playing':
-      drawGameplay(ctx, state, config);
+      drawGameplay(ctx, state, config, levelConfig);
       break;
     case 'results':
       drawResults(ctx, state);
-      break;
-    case 'upgrades':
-      drawUpgrades(ctx, state);
       break;
   }
 
@@ -36,7 +35,6 @@ function drawMenu(ctx: CanvasRenderingContext2D, state: GameState): void {
   const { width, height } = ctx.canvas;
   const centerX = width / 2;
 
-  // Background grid effect
   drawGrid(ctx, width, height, state.beatPulse);
 
   // Title with glow
@@ -44,89 +42,151 @@ function drawMenu(ctx: CanvasRenderingContext2D, state: GameState): void {
   ctx.shadowColor = NEON_COLORS.pink;
   ctx.shadowBlur = 30;
   ctx.fillStyle = NEON_COLORS.pink;
-  ctx.font = 'bold 72px Arial';
+  ctx.font = 'bold 64px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText('COMBO SURGE', centerX, 120);
+  ctx.fillText('COMBO SURGE', centerX, 80);
   ctx.restore();
-
-  // Subtitle
-  ctx.fillStyle = NEON_COLORS.cyan;
-  ctx.font = '24px Arial';
-  ctx.fillText('Build combos. Get points. Unlock everything.', centerX, 170);
 
   // Points display
   ctx.save();
   ctx.shadowColor = NEON_COLORS.yellow;
   ctx.shadowBlur = 15;
   ctx.fillStyle = NEON_COLORS.yellow;
-  ctx.font = 'bold 28px Arial';
-  ctx.fillText(`POINTS: ${state.totalPoints}`, centerX, 220);
+  ctx.font = 'bold 24px Arial';
+  ctx.fillText(`POINTS: ${state.totalPoints}`, centerX, 120);
   ctx.restore();
 
-  // Level buttons
-  const startY = 280;
-  const buttonHeight = 60;
-  const buttonWidth = 300;
-  const spacing = 20;
+  // === LEFT PANEL: UPGRADES ===
+  const leftPanelX = 40;
+  ctx.fillStyle = NEON_COLORS.purple;
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText('UPGRADES', leftPanelX, 160);
 
-  for (let i = 0; i < state.levels.length; i++) {
-    const level = state.levels[i];
-    const btnY = startY + i * (buttonHeight + spacing);
-    const btnX = centerX - buttonWidth / 2;
+  const upgradeStartY = 180;
+  const upgradeH = 50;
+  const upgradeW = 200;
+  const upgradeSpacing = 8;
 
-    drawButton(ctx, btnX, btnY, buttonWidth, buttonHeight, level.unlocked, () => {
-      // Button content
-      if (level.unlocked) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 18px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(level.name, btnX + 15, btnY + 25);
+  for (let i = 0; i < state.upgrades.length; i++) {
+    const upgrade = state.upgrades[i];
+    const btnY = upgradeStartY + i * (upgradeH + upgradeSpacing);
+    const cost = Math.floor(upgrade.baseCost * Math.pow(1.5, upgrade.currentLevel));
+    const isMaxed = upgrade.currentLevel >= upgrade.maxLevel;
+    const canAfford = state.totalPoints >= cost;
 
-        ctx.fillStyle = NEON_COLORS.cyan;
-        ctx.font = '14px Arial';
-        ctx.fillText(`${level.bpm} BPM`, btnX + 15, btnY + 45);
+    // Button background
+    ctx.fillStyle = isMaxed ? 'rgba(0, 255, 0, 0.1)' : canAfford ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.03)';
+    ctx.fillRect(leftPanelX, btnY, upgradeW, upgradeH);
 
-        if (level.highScore > 0) {
-          ctx.fillStyle = NEON_COLORS.yellow;
-          ctx.textAlign = 'right';
-          ctx.fillText(`Best: ${level.highScore}`, btnX + buttonWidth - 15, btnY + 25);
-          ctx.fillStyle = NEON_COLORS.green;
-          ctx.fillText(`Max Combo: ${level.maxCombo}`, btnX + buttonWidth - 15, btnY + 45);
-        }
-      } else {
-        ctx.fillStyle = '#666666';
-        ctx.font = 'bold 18px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(level.name, btnX + 15, btnY + 25);
+    // Border
+    ctx.strokeStyle = isMaxed ? NEON_COLORS.green : canAfford ? NEON_COLORS.cyan : '#333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(leftPanelX, btnY, upgradeW, upgradeH);
 
-        ctx.fillStyle = state.totalPoints >= level.unlockCost ? NEON_COLORS.green : NEON_COLORS.red;
-        ctx.font = '14px Arial';
-        ctx.fillText(`Unlock: ${level.unlockCost} points`, btnX + 15, btnY + 45);
-      }
-    });
+    // Name
+    ctx.fillStyle = isMaxed ? NEON_COLORS.green : '#ffffff';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(upgrade.name, leftPanelX + 8, btnY + 18);
+
+    // Level bar
+    const barX = leftPanelX + 8;
+    const barY = btnY + 26;
+    const barW = upgradeW - 16;
+    const barH = 6;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = NEON_COLORS.cyan;
+    ctx.fillRect(barX, barY, barW * (upgrade.currentLevel / upgrade.maxLevel), barH);
+
+    // Cost or MAXED
+    ctx.font = '11px Arial';
+    if (isMaxed) {
+      ctx.fillStyle = NEON_COLORS.green;
+      ctx.fillText('MAXED', leftPanelX + 8, btnY + 45);
+    } else {
+      ctx.fillStyle = canAfford ? NEON_COLORS.green : NEON_COLORS.red;
+      ctx.fillText(`Cost: ${cost}`, leftPanelX + 8, btnY + 45);
+    }
+
+    // Level text
+    ctx.fillStyle = '#888';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Lv ${upgrade.currentLevel}/${upgrade.maxLevel}`, leftPanelX + upgradeW - 8, btnY + 45);
   }
 
-  // Upgrades button
-  const upgradeBtnY = startY + state.levels.length * (buttonHeight + spacing) + 20;
-  drawButton(ctx, centerX - buttonWidth / 2, upgradeBtnY, buttonWidth, buttonHeight, true, () => {
-    ctx.fillStyle = NEON_COLORS.purple;
-    ctx.font = 'bold 20px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('UPGRADES', centerX, upgradeBtnY + 38);
-  });
+  // === CENTER: PLAY BUTTON & LEVEL SELECT ===
+  const playBtnY = 280;
+  const playBtnW = 250;
+  const playBtnH = 60;
+
+  // Play button
+  ctx.save();
+  ctx.shadowColor = NEON_COLORS.green;
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+  ctx.fillRect(centerX - playBtnW / 2, playBtnY, playBtnW, playBtnH);
+  ctx.strokeStyle = NEON_COLORS.green;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(centerX - playBtnW / 2, playBtnY, playBtnW, playBtnH);
+  ctx.fillStyle = NEON_COLORS.green;
+  ctx.font = 'bold 28px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('PLAY', centerX, playBtnY + 40);
+  ctx.restore();
+
+  // Level selector
+  const levelY = 380;
+  const currentLevel = generateLevel(state.currentLevelNum);
+  const levelName = getLevelName(state.currentLevelNum);
+
+  // Arrows
+  ctx.fillStyle = state.currentLevelNum > 1 ? NEON_COLORS.cyan : '#333';
+  ctx.font = 'bold 32px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('<', centerX - 80, levelY + 10);
+
+  ctx.fillStyle = state.currentLevelNum < state.highestLevel ? NEON_COLORS.cyan : '#333';
+  ctx.fillText('>', centerX + 80, levelY + 10);
+
+  // Level info
+  ctx.fillStyle = NEON_COLORS.yellow;
+  ctx.font = 'bold 24px Arial';
+  ctx.fillText(`Level ${state.currentLevelNum}`, centerX, levelY);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '18px Arial';
+  ctx.fillText(levelName, centerX, levelY + 30);
+
+  ctx.fillStyle = NEON_COLORS.cyan;
+  ctx.font = '14px Arial';
+  ctx.fillText(`${currentLevel.bpm} BPM | ${currentLevel.duration}s`, centerX, levelY + 55);
+
+  // High score for this level
+  const highScore = state.levelHighScores.get(state.currentLevelNum) || 0;
+  const maxCombo = state.levelMaxCombos.get(state.currentLevelNum) || 0;
+  if (highScore > 0) {
+    ctx.fillStyle = NEON_COLORS.yellow;
+    ctx.fillText(`Best: ${highScore} | Max Combo: ${maxCombo}x`, centerX, levelY + 80);
+  }
+
+  // Highest level unlocked
+  ctx.fillStyle = '#666';
+  ctx.font = '12px Arial';
+  ctx.fillText(`Highest Level Unlocked: ${state.highestLevel}`, centerX, levelY + 110);
 
   // Controls hint
-  ctx.fillStyle = '#666666';
-  ctx.font = '16px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText('Use D, F, J, K to hit notes | SPACE to quick start', centerX, height - 30);
+  ctx.fillStyle = '#555';
+  ctx.font = '14px Arial';
+  ctx.fillText('SPACE to play | W/S or Arrows to change level', centerX, height - 60);
+  ctx.fillText('D, F, J, K to hit notes | ESC to pause', centerX, height - 40);
 }
 
-function drawGameplay(ctx: CanvasRenderingContext2D, state: GameState, config: GameConfig): void {
+function drawGameplay(ctx: CanvasRenderingContext2D, state: GameState, config: GameConfig, levelConfig: LevelConfig | null): void {
   const { width, height } = ctx.canvas;
   const hitLineY = height * config.hitLineY;
 
-  // Background with beat pulse
   drawGrid(ctx, width, height, state.beatPulse);
 
   // Draw lanes
@@ -154,7 +214,7 @@ function drawGameplay(ctx: CanvasRenderingContext2D, state: GameState, config: G
   }
 
   // Draw UI
-  drawGameUI(ctx, state, width);
+  drawGameUI(ctx, state, width, levelConfig);
 
   // Countdown
   if (state.gameTime < 0) {
@@ -223,7 +283,6 @@ function drawLane(
   ctx.arc(lane.x + lane.width / 2, hitLineY, hitZoneRadius, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Fill when pressed
   if (lane.pressed || lane.hitEffect > 0.5) {
     ctx.fillStyle = lane.color + '44';
     ctx.fill();
@@ -242,18 +301,15 @@ function drawNote(ctx: CanvasRenderingContext2D, note: Note, lane: Lane, hitLine
   const y = note.y;
   const size = 20;
 
-  // Note glow
   ctx.save();
   ctx.shadowColor = lane.color;
   ctx.shadowBlur = 15;
 
-  // Note body
   ctx.fillStyle = lane.color;
   ctx.beginPath();
   ctx.arc(x, y, size, 0, Math.PI * 2);
   ctx.fill();
 
-  // Inner highlight
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.arc(x - 5, y - 5, size / 3, 0, Math.PI * 2);
@@ -261,7 +317,6 @@ function drawNote(ctx: CanvasRenderingContext2D, note: Note, lane: Lane, hitLine
 
   ctx.restore();
 
-  // Miss indicator (turn red when past hit line)
   if (note.y > hitLineY + 20 && !note.missed) {
     ctx.fillStyle = NEON_COLORS.red + '88';
     ctx.beginPath();
@@ -270,7 +325,7 @@ function drawNote(ctx: CanvasRenderingContext2D, note: Note, lane: Lane, hitLine
   }
 }
 
-function drawGameUI(ctx: CanvasRenderingContext2D, state: GameState, width: number): void {
+function drawGameUI(ctx: CanvasRenderingContext2D, state: GameState, width: number, levelConfig: LevelConfig | null): void {
   const padding = 20;
 
   // Score (top right)
@@ -286,6 +341,12 @@ function drawGameUI(ctx: CanvasRenderingContext2D, state: GameState, width: numb
   ctx.fillStyle = '#888888';
   ctx.font = '16px Arial';
   ctx.fillText('SCORE', width - padding, 70);
+
+  // Level info
+  ctx.fillStyle = '#666';
+  ctx.font = '14px Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText(`Level ${state.currentLevelNum}`, width - padding, 95);
 
   // Combo (top left)
   if (state.combo.current > 0) {
@@ -306,12 +367,12 @@ function drawGameUI(ctx: CanvasRenderingContext2D, state: GameState, width: numb
   }
 
   // Progress bar (top center)
-  if (state.currentLevel) {
+  if (levelConfig) {
     const barWidth = 300;
     const barHeight = 8;
     const barX = (width - barWidth) / 2;
     const barY = 20;
-    const progress = Math.max(0, state.gameTime / state.currentLevel.duration);
+    const progress = Math.max(0, state.gameTime / levelConfig.duration);
 
     ctx.fillStyle = '#333333';
     ctx.fillRect(barX, barY, barWidth, barHeight);
@@ -335,33 +396,30 @@ function drawResults(ctx: CanvasRenderingContext2D, state: GameState): void {
   ctx.shadowColor = NEON_COLORS.green;
   ctx.shadowBlur = 30;
   ctx.fillStyle = NEON_COLORS.green;
-  ctx.font = 'bold 60px Arial';
+  ctx.font = 'bold 52px Arial';
   ctx.textAlign = 'center';
   ctx.fillText('LEVEL COMPLETE!', centerX, 100);
   ctx.restore();
 
   // Level name
-  if (state.currentLevel) {
-    ctx.fillStyle = NEON_COLORS.cyan;
-    ctx.font = '28px Arial';
-    ctx.fillText(state.currentLevel.name, centerX, 150);
-  }
+  ctx.fillStyle = NEON_COLORS.cyan;
+  ctx.font = '24px Arial';
+  ctx.fillText(`Level ${state.currentLevelNum} - ${getLevelName(state.currentLevelNum)}`, centerX, 145);
 
   // Stats
-  const statsY = 220;
-  const lineHeight = 50;
+  const statsY = 200;
+  const lineHeight = 45;
 
   ctx.font = 'bold 32px Arial';
-
   ctx.fillStyle = NEON_COLORS.yellow;
   ctx.fillText(`Final Score: ${state.score.current}`, centerX, statsY);
 
   ctx.fillStyle = NEON_COLORS.cyan;
   ctx.fillText(`Max Combo: ${state.combo.max}x`, centerX, statsY + lineHeight);
 
-  ctx.font = '24px Arial';
+  ctx.font = '22px Arial';
   ctx.fillStyle = NEON_COLORS.yellow;
-  ctx.fillText(`Perfect: ${state.score.perfectCount}`, centerX - 120, statsY + lineHeight * 2);
+  ctx.fillText(`Perfect: ${state.score.perfectCount}`, centerX - 100, statsY + lineHeight * 2);
   ctx.fillStyle = NEON_COLORS.cyan;
   ctx.fillText(`Great: ${state.score.greatCount}`, centerX, statsY + lineHeight * 2);
   ctx.fillStyle = NEON_COLORS.green;
@@ -380,117 +438,15 @@ function drawResults(ctx: CanvasRenderingContext2D, state: GameState): void {
   ctx.fillText(`+${pointsEarned} POINTS`, centerX, statsY + lineHeight * 4.5);
   ctx.restore();
 
+  // Next level unlocked
+  ctx.fillStyle = NEON_COLORS.green;
+  ctx.font = '20px Arial';
+  ctx.fillText(`Level ${state.currentLevelNum + 1} Unlocked!`, centerX, statsY + lineHeight * 5.5);
+
   // Continue hint
   ctx.fillStyle = '#666666';
-  ctx.font = '20px Arial';
+  ctx.font = '18px Arial';
   ctx.fillText('Click or press SPACE to continue', centerX, height - 50);
-}
-
-function drawUpgrades(ctx: CanvasRenderingContext2D, state: GameState): void {
-  const { width, height } = ctx.canvas;
-  const centerX = width / 2;
-
-  drawGrid(ctx, width, height, 0);
-
-  // Title
-  ctx.save();
-  ctx.shadowColor = NEON_COLORS.purple;
-  ctx.shadowBlur = 30;
-  ctx.fillStyle = NEON_COLORS.purple;
-  ctx.font = 'bold 48px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText('UPGRADES', centerX, 80);
-  ctx.restore();
-
-  // Points
-  ctx.fillStyle = NEON_COLORS.yellow;
-  ctx.font = 'bold 24px Arial';
-  ctx.fillText(`Available Points: ${state.totalPoints}`, centerX, 130);
-
-  // Upgrade buttons
-  const startY = 180;
-  const buttonHeight = 70;
-  const buttonWidth = 400;
-  const spacing = 15;
-
-  for (let i = 0; i < state.upgrades.length; i++) {
-    const upgrade = state.upgrades[i];
-    const btnY = startY + i * (buttonHeight + spacing);
-    const btnX = centerX - buttonWidth / 2;
-    const cost = Math.floor(upgrade.cost * Math.pow(1.5, upgrade.currentLevel));
-    const isMaxed = upgrade.currentLevel >= upgrade.maxLevel;
-    const canAfford = state.totalPoints >= cost;
-
-    drawButton(ctx, btnX, btnY, buttonWidth, buttonHeight, !isMaxed && canAfford, () => {
-      ctx.textAlign = 'left';
-
-      // Name
-      ctx.fillStyle = isMaxed ? NEON_COLORS.green : '#ffffff';
-      ctx.font = 'bold 18px Arial';
-      ctx.fillText(upgrade.name, btnX + 15, btnY + 25);
-
-      // Description
-      ctx.fillStyle = '#888888';
-      ctx.font = '12px Arial';
-      ctx.fillText(upgrade.description, btnX + 15, btnY + 45);
-
-      // Level
-      ctx.textAlign = 'right';
-      ctx.fillStyle = NEON_COLORS.cyan;
-      ctx.font = 'bold 16px Arial';
-      ctx.fillText(`Lv ${upgrade.currentLevel}/${upgrade.maxLevel}`, btnX + buttonWidth - 15, btnY + 25);
-
-      // Cost
-      if (!isMaxed) {
-        ctx.fillStyle = canAfford ? NEON_COLORS.green : NEON_COLORS.red;
-        ctx.font = '14px Arial';
-        ctx.fillText(`Cost: ${cost}`, btnX + buttonWidth - 15, btnY + 50);
-      } else {
-        ctx.fillStyle = NEON_COLORS.green;
-        ctx.fillText('MAXED', btnX + buttonWidth - 15, btnY + 50);
-      }
-    });
-  }
-
-  // Back button
-  const backBtnY = startY + state.upgrades.length * (buttonHeight + spacing) + 20;
-  drawButton(ctx, centerX - 100, backBtnY, 200, 50, true, () => {
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 18px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('BACK', centerX, backBtnY + 32);
-  });
-}
-
-function drawButton(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  active: boolean,
-  drawContent: () => void
-): void {
-  // Background
-  ctx.fillStyle = active ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.03)';
-  ctx.fillRect(x, y, width, height);
-
-  // Border
-  ctx.strokeStyle = active ? NEON_COLORS.cyan : '#333333';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, y, width, height);
-
-  // Glow effect for active buttons
-  if (active) {
-    ctx.save();
-    ctx.shadowColor = NEON_COLORS.cyan;
-    ctx.shadowBlur = 10;
-    ctx.strokeRect(x, y, width, height);
-    ctx.restore();
-  }
-
-  // Draw content
-  drawContent();
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, pulse: number): void {
@@ -500,7 +456,6 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, 
   ctx.strokeStyle = `rgba(100, 100, 150, ${alpha})`;
   ctx.lineWidth = 1;
 
-  // Vertical lines
   for (let x = 0; x < width; x += gridSize) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
@@ -508,7 +463,6 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, 
     ctx.stroke();
   }
 
-  // Horizontal lines
   for (let y = 0; y < height; y += gridSize) {
     ctx.beginPath();
     ctx.moveTo(0, y);
@@ -516,7 +470,6 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, 
     ctx.stroke();
   }
 
-  // Horizon glow at bottom
   const horizonGradient = ctx.createLinearGradient(0, height - 200, 0, height);
   horizonGradient.addColorStop(0, 'rgba(255, 0, 255, 0)');
   horizonGradient.addColorStop(0.5, `rgba(255, 0, 255, ${0.1 + pulse * 0.1})`);

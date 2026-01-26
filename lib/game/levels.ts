@@ -1,119 +1,100 @@
-import { Level, NotePattern, NoteType } from '../types';
+import { LevelConfig, NotePattern, NoteType } from '../types';
 
-// Generate patterns for a level based on BPM and difficulty
-function generatePatterns(bpm: number, duration: number, difficulty: number): NotePattern[] {
+// Seeded random for consistent level generation
+class SeededRandom {
+  private seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
+
+  next(): number {
+    this.seed = (this.seed * 1103515245 + 12345) & 0x7fffffff;
+    return this.seed / 0x7fffffff;
+  }
+}
+
+// Generate level config for any level number (infinite)
+export function generateLevel(levelNum: number): LevelConfig {
+  const rng = new SeededRandom(levelNum * 12345);
+
+  // BPM increases with level: starts at 80, increases by ~5 per level, caps at 200
+  const baseBpm = 80;
+  const bpmIncrease = Math.min(levelNum * 5, 120);
+  const bpm = baseBpm + bpmIncrease;
+
+  // Duration: 20-60 seconds, longer at higher levels
+  const duration = Math.min(20 + levelNum * 2, 60);
+
+  // Difficulty scales with level (1.0 to 5.0+)
+  const difficulty = 1 + (levelNum - 1) * 0.15;
+
+  // Generate patterns
+  const patterns = generatePatterns(bpm, duration, difficulty, rng);
+
+  return { bpm, duration, difficulty, patterns };
+}
+
+function generatePatterns(bpm: number, duration: number, difficulty: number, rng: SeededRandom): NotePattern[] {
   const patterns: NotePattern[] = [];
   const beatDuration = 60 / bpm;
   const totalBeats = Math.floor(duration / beatDuration);
 
-  // Difficulty affects:
-  // - Pattern density (more notes per beat at higher difficulty)
-  // - Multi-lane patterns
-  // - Hold notes
+  // Note density increases with difficulty
+  const baseNoteChance = 0.5 + Math.min(difficulty * 0.08, 0.4);
+  // Double note chance
+  const doubleChance = Math.min(0.05 + difficulty * 0.05, 0.4);
+  // Off-beat note chance
+  const offBeatChance = Math.min(difficulty * 0.08, 0.5);
 
   for (let beat = 0; beat < totalBeats; beat++) {
     const time = (beat * beatDuration) / duration;
 
-    // Skip first few beats
+    // Skip first 4 beats for warm-up
     if (beat < 4) continue;
 
-    // Basic rhythm: every beat has a chance of notes
-    const roll = Math.random();
+    // Main beat notes
+    if (rng.next() < baseNoteChance) {
+      const lanes = [Math.floor(rng.next() * 4)];
 
-    if (difficulty <= 1) {
-      // Easy: Single notes on main beats
-      if (beat % 2 === 0 && roll < 0.7) {
+      // Chance for double note
+      if (rng.next() < doubleChance) {
+        let secondLane: number;
+        do {
+          secondLane = Math.floor(rng.next() * 4);
+        } while (secondLane === lanes[0]);
+        lanes.push(secondLane);
+      }
+
+      patterns.push({
+        time,
+        lanes,
+        type: NoteType.Normal,
+      });
+    }
+
+    // Off-beat notes (half-beat)
+    if (rng.next() < offBeatChance) {
+      const offBeatTime = time + (0.5 * beatDuration) / duration;
+      if (offBeatTime < 0.95) {
         patterns.push({
-          time,
-          lanes: [Math.floor(Math.random() * 4)],
+          time: offBeatTime,
+          lanes: [Math.floor(rng.next() * 4)],
           type: NoteType.Normal,
         });
       }
-    } else if (difficulty <= 2) {
-      // Medium: Notes on every beat, occasional doubles
-      if (roll < 0.8) {
-        const lanes = [Math.floor(Math.random() * 4)];
-        // 20% chance of double
-        if (Math.random() < 0.2) {
-          let secondLane;
-          do {
-            secondLane = Math.floor(Math.random() * 4);
-          } while (secondLane === lanes[0]);
-          lanes.push(secondLane);
-        }
-        patterns.push({
-          time,
-          lanes,
-          type: NoteType.Normal,
-        });
-      }
-    } else if (difficulty <= 3) {
-      // Hard: Faster patterns, more doubles
-      if (roll < 0.85) {
-        const lanes = [Math.floor(Math.random() * 4)];
-        if (Math.random() < 0.35) {
-          let secondLane;
-          do {
-            secondLane = Math.floor(Math.random() * 4);
-          } while (secondLane === lanes[0]);
-          lanes.push(secondLane);
-        }
-        patterns.push({
-          time,
-          lanes,
-          type: NoteType.Normal,
-        });
-      }
-      // Off-beat notes
-      if (Math.random() < 0.3) {
-        const offBeatTime = time + (0.5 * beatDuration) / duration;
-        if (offBeatTime < 1) {
+    }
+
+    // At high difficulty, add triplets occasionally
+    if (difficulty > 2 && rng.next() < 0.1) {
+      for (let t = 1; t <= 2; t++) {
+        const tripletTime = time + (t * beatDuration / 3) / duration;
+        if (tripletTime < 0.95) {
           patterns.push({
-            time: offBeatTime,
-            lanes: [Math.floor(Math.random() * 4)],
+            time: tripletTime,
+            lanes: [Math.floor(rng.next() * 4)],
             type: NoteType.Normal,
           });
-        }
-      }
-    } else {
-      // Expert: Very dense patterns
-      if (roll < 0.9) {
-        const lanes = [Math.floor(Math.random() * 4)];
-        if (Math.random() < 0.45) {
-          let secondLane;
-          do {
-            secondLane = Math.floor(Math.random() * 4);
-          } while (secondLane === lanes[0]);
-          lanes.push(secondLane);
-        }
-        patterns.push({
-          time,
-          lanes,
-          type: NoteType.Normal,
-        });
-      }
-      // Off-beat notes
-      if (Math.random() < 0.5) {
-        const offBeatTime = time + (0.5 * beatDuration) / duration;
-        if (offBeatTime < 1) {
-          patterns.push({
-            time: offBeatTime,
-            lanes: [Math.floor(Math.random() * 4)],
-            type: NoteType.Normal,
-          });
-        }
-      }
-      // Triplets occasionally
-      if (Math.random() < 0.15) {
-        for (let t = 1; t <= 2; t++) {
-          const tripletTime = time + (t * beatDuration / 3) / duration;
-          if (tripletTime < 1) {
-            patterns.push({
-              time: tripletTime,
-              lanes: [Math.floor(Math.random() * 4)],
-              type: NoteType.Normal,
-            });
-          }
         }
       }
     }
@@ -125,103 +106,19 @@ function generatePatterns(bpm: number, duration: number, difficulty: number): No
   return patterns;
 }
 
-export function generateLevels(): Level[] {
-  const levels: Level[] = [
-    {
-      id: 1,
-      name: 'First Steps',
-      bpm: 90,
-      duration: 30,
-      unlockCost: 0,
-      unlocked: true,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
-    {
-      id: 2,
-      name: 'Warm Up',
-      bpm: 100,
-      duration: 40,
-      unlockCost: 200,
-      unlocked: false,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
-    {
-      id: 3,
-      name: 'Getting Started',
-      bpm: 110,
-      duration: 45,
-      unlockCost: 500,
-      unlocked: false,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
-    {
-      id: 4,
-      name: 'Neon Nights',
-      bpm: 120,
-      duration: 50,
-      unlockCost: 1000,
-      unlocked: false,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
-    {
-      id: 5,
-      name: 'Electric Dreams',
-      bpm: 130,
-      duration: 55,
-      unlockCost: 2000,
-      unlocked: false,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
-    {
-      id: 6,
-      name: 'Cyber Rush',
-      bpm: 140,
-      duration: 60,
-      unlockCost: 4000,
-      unlocked: false,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
-    {
-      id: 7,
-      name: 'Synthwave Storm',
-      bpm: 150,
-      duration: 70,
-      unlockCost: 7500,
-      unlocked: false,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
-    {
-      id: 8,
-      name: 'Maximum Overdrive',
-      bpm: 165,
-      duration: 80,
-      unlockCost: 15000,
-      unlocked: false,
-      highScore: 0,
-      maxCombo: 0,
-      patterns: [],
-    },
+// Get level name based on level number
+export function getLevelName(levelNum: number): string {
+  const names = [
+    'First Steps', 'Warm Up', 'Getting Started', 'Neon Nights',
+    'Electric Dreams', 'Cyber Rush', 'Synthwave', 'Overdrive',
+    'Hyperspeed', 'Lightspeed', 'Warp Zone', 'Infinity',
+    'Beyond', 'Transcend', 'Ascension', 'Godlike'
   ];
 
-  // Generate patterns for each level
-  for (let i = 0; i < levels.length; i++) {
-    const difficulty = 1 + (i / (levels.length - 1)) * 3; // 1 to 4
-    levels[i].patterns = generatePatterns(levels[i].bpm, levels[i].duration, difficulty);
+  if (levelNum <= names.length) {
+    return names[levelNum - 1];
   }
 
-  return levels;
+  // For levels beyond the name list
+  return `Level ${levelNum}`;
 }

@@ -2,8 +2,8 @@
 
 export enum NoteType {
   Normal = 'normal',
-  Double = 'double',    // Hit two keys at once
-  Hold = 'hold',        // Hold the key
+  Double = 'double',
+  Hold = 'hold',
 }
 
 export enum HitRating {
@@ -15,25 +15,25 @@ export enum HitRating {
 
 export interface Note {
   id: string;
-  lane: number;         // 0-3 for 4 lanes
+  lane: number;
   type: NoteType;
-  spawnTime: number;    // When the note spawns (game time)
-  hitTime: number;      // When the note should be hit (game time)
-  holdDuration?: number; // For hold notes
-  y: number;            // Current y position
-  hit: boolean;         // Was this note hit
-  missed: boolean;      // Was this note missed
-  rating?: HitRating;   // Hit rating if hit
+  spawnTime: number;
+  hitTime: number;
+  holdDuration?: number;
+  y: number;
+  hit: boolean;
+  missed: boolean;
+  rating?: HitRating;
 }
 
 export interface Lane {
   x: number;
   width: number;
-  key: string;          // Keyboard key for this lane
-  color: string;        // Neon color
-  glowColor: string;    // Glow effect color
-  pressed: boolean;     // Is the key currently pressed
-  hitEffect: number;    // Timer for hit effect animation
+  key: string;
+  color: string;
+  glowColor: string;
+  pressed: boolean;
+  hitEffect: number;
 }
 
 export interface Particle {
@@ -65,7 +65,7 @@ export interface ComboState {
 
 export interface ScoreState {
   current: number;
-  display: number;      // Animated display score
+  display: number;
   perfectCount: number;
   greatCount: number;
   goodCount: number;
@@ -76,34 +76,23 @@ export interface Upgrade {
   id: string;
   name: string;
   description: string;
-  cost: number;
+  baseCost: number;
   maxLevel: number;
   currentLevel: number;
-  effect: number;       // Effect per level
-}
-
-export interface Level {
-  id: number;
-  name: string;
-  bpm: number;
-  duration: number;     // Seconds
-  unlockCost: number;
-  unlocked: boolean;
-  highScore: number;
-  maxCombo: number;
-  patterns: NotePattern[];
+  effect: number;
 }
 
 export interface NotePattern {
-  time: number;         // When to spawn (0-1 normalized to duration)
-  lanes: number[];      // Which lanes get notes
+  time: number;
+  lanes: number[];
   type: NoteType;
   holdDuration?: number;
 }
 
 export interface GameState {
-  screen: 'menu' | 'playing' | 'results' | 'upgrades';
-  currentLevel: Level | null;
+  screen: 'menu' | 'playing' | 'results';
+  currentLevelNum: number;
+  highestLevel: number;
   gameTime: number;
   notes: Note[];
   lanes: Lane[];
@@ -111,18 +100,26 @@ export interface GameState {
   score: ScoreState;
   particles: Particle[];
   floatingTexts: FloatingText[];
-  totalPoints: number;  // Currency for unlocks
+  totalPoints: number;
   upgrades: Upgrade[];
-  levels: Level[];
   isPaused: boolean;
-  hitWindow: number;    // Base timing window (ms)
-  noteSpeed: number;    // How fast notes fall
-  beatPulse: number;    // Visual beat pulse effect
+  hitWindow: number;
+  noteSpeed: number;
+  beatPulse: number;
+  levelHighScores: Map<number, number>;
+  levelMaxCombos: Map<number, number>;
+}
+
+export interface LevelConfig {
+  bpm: number;
+  duration: number;
+  difficulty: number;
+  patterns: NotePattern[];
 }
 
 export interface GameConfig {
   laneCount: number;
-  hitLineY: number;     // Y position of the hit line (0-1)
+  hitLineY: number;
   baseHitWindow: number;
   baseNoteSpeed: number;
   perfectWindow: number;
@@ -133,14 +130,13 @@ export interface GameConfig {
 export const DEFAULT_CONFIG: GameConfig = {
   laneCount: 4,
   hitLineY: 0.85,
-  baseHitWindow: 150,   // ms
-  baseNoteSpeed: 400,   // pixels per second
-  perfectWindow: 40,    // ms - tight timing
+  baseHitWindow: 150,
+  baseNoteSpeed: 400,
+  perfectWindow: 40,
   greatWindow: 80,
   goodWindow: 120,
 };
 
-// Neon color palette
 export const NEON_COLORS = {
   pink: '#ff00ff',
   cyan: '#00ffff',
@@ -161,46 +157,45 @@ export const LANE_COLORS = [
 
 export const LANE_KEYS = ['D', 'F', 'J', 'K'];
 
-// Upgrade definitions
 export const UPGRADE_DEFINITIONS: Omit<Upgrade, 'currentLevel'>[] = [
   {
     id: 'timing',
     name: 'Better Timing',
-    description: 'Increases hit window by 10% per level',
-    cost: 500,
-    maxLevel: 5,
+    description: '+10% hit window',
+    baseCost: 100,
+    maxLevel: 10,
     effect: 0.1,
   },
   {
     id: 'multiplier',
     name: 'Score Boost',
-    description: 'Increases base score by 15% per level',
-    cost: 750,
-    maxLevel: 5,
+    description: '+15% base score',
+    baseCost: 150,
+    maxLevel: 10,
     effect: 0.15,
   },
   {
     id: 'combo_shield',
     name: 'Combo Shield',
-    description: 'Chance to save combo on miss (10% per level)',
-    cost: 1000,
-    maxLevel: 5,
-    effect: 0.1,
+    description: '+8% save chance',
+    baseCost: 200,
+    maxLevel: 10,
+    effect: 0.08,
   },
   {
     id: 'perfect_bonus',
     name: 'Perfect Master',
-    description: 'Bonus points for perfect hits (+20% per level)',
-    cost: 1200,
-    maxLevel: 5,
+    description: '+20% perfect pts',
+    baseCost: 250,
+    maxLevel: 10,
     effect: 0.2,
   },
   {
     id: 'slow_notes',
     name: 'Focus Mode',
-    description: 'Notes move 5% slower per level',
-    cost: 600,
-    maxLevel: 5,
+    description: '-5% note speed',
+    baseCost: 120,
+    maxLevel: 10,
     effect: 0.05,
   },
 ];
