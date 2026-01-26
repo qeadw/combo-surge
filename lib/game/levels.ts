@@ -14,23 +14,21 @@ class SeededRandom {
   }
 }
 
-// Generate level config for any level number (infinite)
+// Generate level config for any level number (infinite gameplay)
 export function generateLevel(levelNum: number): LevelConfig {
-  const rng = new SeededRandom(levelNum * 12345);
-
   // BPM increases with level: starts at 80, increases by ~5 per level, caps at 200
   const baseBpm = 80;
   const bpmIncrease = Math.min(levelNum * 5, 120);
   const bpm = baseBpm + bpmIncrease;
 
-  // Duration: 20-60 seconds, longer at higher levels
-  const duration = Math.min(20 + levelNum * 2, 60);
-
   // Difficulty scales with level (1.0 to 5.0+)
   const difficulty = 1 + (levelNum - 1) * 0.15;
 
-  // Generate patterns
-  const patterns = generatePatterns(bpm, duration, difficulty, rng);
+  // Duration is infinite (we use a large number, patterns generated on the fly)
+  const duration = Infinity;
+
+  // Patterns are empty - generated dynamically during gameplay
+  const patterns: NotePattern[] = [];
 
   return { bpm, duration, difficulty, patterns };
 }

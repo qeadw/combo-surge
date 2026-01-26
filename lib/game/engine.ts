@@ -22,6 +22,20 @@ let noteIdCounter = 0;
 
 const SAVE_KEY = 'combo_surge_save_v2';
 
+// Seeded random for consistent note generation
+class SeededRandom {
+  private seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
+
+  next(): number {
+    this.seed = (this.seed * 1103515245 + 12345) & 0x7fffffff;
+    return this.seed / 0x7fffffff;
+  }
+}
+
 interface SaveData {
   totalPoints: number;
   highestLevel: number;
@@ -42,6 +56,8 @@ export class GameEngine {
   private keyUpHandler: (e: KeyboardEvent) => void;
   private clickHandler: (e: MouseEvent) => void;
   private currentLevelConfig: LevelConfig | null = null;
+  private nextBeatTime: number = 0;
+  private levelRng: { next: () => number } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -176,7 +192,7 @@ export class GameEngine {
 
   private updateGameplay(deltaTime: number): void {
     const levelConfig = this.currentLevelConfig;
-    if (!levelConfig) return;
+    if (!levelConfig || !this.levelRng) return;
 
     this.state.gameTime += deltaTime;
 
@@ -185,24 +201,40 @@ export class GameEngine {
     const speedMultiplier = slowUpgrade ? 1 - (slowUpgrade.currentLevel * slowUpgrade.effect) : 1;
     const effectiveSpeed = this.config.baseNoteSpeed * speedMultiplier;
 
-    // Spawn notes based on patterns
+    // Calculate beat timing
+    const beatInterval = 60 / levelConfig.bpm;
     const hitLineY = this.canvas.height * this.config.hitLineY;
     const travelTime = hitLineY / effectiveSpeed;
 
-    for (const pattern of levelConfig.patterns) {
-      const patternTime = pattern.time * levelConfig.duration;
-      const spawnTime = patternTime - travelTime;
+    // Spawn notes dynamically based on beats
+    while (this.nextBeatTime < this.state.gameTime + travelTime + beatInterval) {
+      // Skip first few beats for warmup
+      if (this.nextBeatTime > 0) {
+        // Note density based on difficulty
+        const noteChance = 0.5 + Math.min(levelConfig.difficulty * 0.08, 0.4);
+        const doubleChance = Math.min(0.05 + levelConfig.difficulty * 0.05, 0.4);
+        const offBeatChance = Math.min(levelConfig.difficulty * 0.08, 0.5);
 
-      if (this.state.gameTime >= spawnTime && this.state.gameTime < spawnTime + deltaTime) {
-        for (const laneIndex of pattern.lanes) {
-          if (laneIndex >= 0 && laneIndex < this.config.laneCount) {
+        // Main beat note
+        if (this.levelRng.next() < noteChance) {
+          const lanes = [Math.floor(this.levelRng.next() * 4)];
+
+          // Chance for double note
+          if (this.levelRng.next() < doubleChance) {
+            let secondLane: number;
+            do {
+              secondLane = Math.floor(this.levelRng.next() * 4);
+            } while (secondLane === lanes[0]);
+            lanes.push(secondLane);
+          }
+
+          for (const laneIndex of lanes) {
             const note: Note = {
               id: `note_${noteIdCounter++}`,
               lane: laneIndex,
-              type: pattern.type,
-              spawnTime: spawnTime,
-              hitTime: patternTime,
-              holdDuration: pattern.holdDuration,
+              type: NoteType.Normal,
+              spawnTime: this.nextBeatTime - travelTime,
+              hitTime: this.nextBeatTime,
               y: -30,
               hit: false,
               missed: false,
@@ -210,15 +242,33 @@ export class GameEngine {
             this.state.notes.push(note);
           }
         }
+
+        // Off-beat note (half-beat)
+        if (this.levelRng.next() < offBeatChance) {
+          const offBeatTime = this.nextBeatTime + beatInterval / 2;
+          const note: Note = {
+            id: `note_${noteIdCounter++}`,
+            lane: Math.floor(this.levelRng.next() * 4),
+            type: NoteType.Normal,
+            spawnTime: offBeatTime - travelTime,
+            hitTime: offBeatTime,
+            y: -30,
+            hit: false,
+            missed: false,
+          };
+          this.state.notes.push(note);
+        }
       }
+
+      this.nextBeatTime += beatInterval;
     }
 
     // Update note positions
     for (const note of this.state.notes) {
       if (!note.hit && !note.missed) {
-        note.y += effectiveSpeed * deltaTime;
+        const timeSinceSpawn = this.state.gameTime - note.spawnTime;
+        note.y = -30 + timeSinceSpawn * effectiveSpeed;
 
-        const hitLineY = this.canvas.height * this.config.hitLineY;
         if (note.y > hitLineY + 50) {
           this.missNote(note);
         }
@@ -229,14 +279,13 @@ export class GameEngine {
     this.state.notes = this.state.notes.filter(n => n.y < this.canvas.height + 50);
 
     // Update beat pulse based on BPM
-    const beatInterval = 60 / levelConfig.bpm;
     const beatPhase = (this.state.gameTime % beatInterval) / beatInterval;
     if (beatPhase < 0.1) {
       this.state.beatPulse = Math.max(this.state.beatPulse, 1 - beatPhase * 10);
     }
 
-    // Check if level is complete
-    if (this.state.gameTime >= levelConfig.duration + 2) {
+    // Level ends when you get 10 misses
+    if (this.state.score.missCount >= 10) {
       this.endLevel();
     }
   }
@@ -515,6 +564,8 @@ export class GameEngine {
 
   private startLevel(levelNum: number): void {
     this.currentLevelConfig = generateLevel(levelNum);
+    this.levelRng = new SeededRandom(levelNum * 12345);
+    this.nextBeatTime = 0;
     this.state.currentLevelNum = levelNum;
     this.state.screen = 'playing';
     this.state.gameTime = -2;
@@ -538,8 +589,9 @@ export class GameEngine {
       this.state.levelMaxCombos.set(levelNum, this.state.combo.max);
     }
 
-    // Unlock next level
-    if (levelNum >= this.state.highestLevel) {
+    // Unlock next level if score is high enough (1000 * level number)
+    const unlockThreshold = 1000 * levelNum;
+    if (levelNum >= this.state.highestLevel && this.state.score.current >= unlockThreshold) {
       this.state.highestLevel = levelNum + 1;
     }
 

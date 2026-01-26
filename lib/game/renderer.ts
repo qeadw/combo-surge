@@ -161,7 +161,7 @@ function drawMenu(ctx: CanvasRenderingContext2D, state: GameState): void {
 
   ctx.fillStyle = NEON_COLORS.cyan;
   ctx.font = '14px Arial';
-  ctx.fillText(`${currentLevel.bpm} BPM | ${currentLevel.duration}s`, centerX, levelY + 55);
+  ctx.fillText(`${currentLevel.bpm} BPM | Endless`, centerX, levelY + 55);
 
   // High score for this level
   const highScore = state.levelHighScores.get(state.currentLevelNum) || 0;
@@ -411,23 +411,28 @@ function drawGameUI(ctx: CanvasRenderingContext2D, state: GameState, width: numb
     ctx.fillText(`Multiplier: ${state.combo.multiplier.toFixed(1)}x`, padding, 80);
   }
 
-  // Progress bar (top center)
-  if (levelConfig) {
-    const barWidth = 300;
-    const barHeight = 8;
-    const barX = (width - barWidth) / 2;
-    const barY = 20;
-    const progress = Math.max(0, state.gameTime / levelConfig.duration);
+  // Miss counter (top center) - 10 misses = game over
+  const maxMisses = 10;
+  const missBarWidth = 200;
+  const missBarHeight = 12;
+  const missBarX = (width - missBarWidth) / 2;
+  const missBarY = 20;
 
-    ctx.fillStyle = '#333333';
-    ctx.fillRect(barX, barY, barWidth, barHeight);
+  ctx.fillStyle = '#333333';
+  ctx.fillRect(missBarX, missBarY, missBarWidth, missBarHeight);
 
-    const gradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
-    gradient.addColorStop(0, NEON_COLORS.pink);
-    gradient.addColorStop(1, NEON_COLORS.cyan);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(barX, barY, barWidth * Math.min(1, progress), barHeight);
-  }
+  const missProgress = state.score.missCount / maxMisses;
+  ctx.fillStyle = missProgress > 0.7 ? NEON_COLORS.red : missProgress > 0.4 ? NEON_COLORS.orange : NEON_COLORS.green;
+  ctx.fillRect(missBarX, missBarY, missBarWidth * missProgress, missBarHeight);
+
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(missBarX, missBarY, missBarWidth, missBarHeight);
+
+  ctx.fillStyle = '#888';
+  ctx.font = '12px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${state.score.missCount} / ${maxMisses} misses`, width / 2, missBarY + 26);
 }
 
 function drawResults(ctx: CanvasRenderingContext2D, state: GameState): void {
@@ -438,12 +443,12 @@ function drawResults(ctx: CanvasRenderingContext2D, state: GameState): void {
 
   // Title
   ctx.save();
-  ctx.shadowColor = NEON_COLORS.green;
+  ctx.shadowColor = NEON_COLORS.red;
   ctx.shadowBlur = 30;
-  ctx.fillStyle = NEON_COLORS.green;
+  ctx.fillStyle = NEON_COLORS.red;
   ctx.font = 'bold 52px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText('LEVEL COMPLETE!', centerX, 100);
+  ctx.fillText('GAME OVER', centerX, 100);
   ctx.restore();
 
   // Level name
@@ -483,10 +488,25 @@ function drawResults(ctx: CanvasRenderingContext2D, state: GameState): void {
   ctx.fillText(`+${pointsEarned} POINTS`, centerX, statsY + lineHeight * 4.5);
   ctx.restore();
 
-  // Next level unlocked
-  ctx.fillStyle = NEON_COLORS.green;
-  ctx.font = '20px Arial';
-  ctx.fillText(`Level ${state.currentLevelNum + 1} Unlocked!`, centerX, statsY + lineHeight * 5.5);
+  // New high score indicator
+  const isNewHighScore = state.score.current > (state.levelHighScores.get(state.currentLevelNum) || 0);
+  if (isNewHighScore && state.score.current > 0) {
+    ctx.fillStyle = NEON_COLORS.yellow;
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText('NEW HIGH SCORE!', centerX, statsY + lineHeight * 5.5);
+  }
+
+  // Level unlock info
+  const unlockThreshold = 1000 * state.currentLevelNum;
+  const unlockedNext = state.score.current >= unlockThreshold && state.currentLevelNum >= state.highestLevel - 1;
+  ctx.font = '16px Arial';
+  if (unlockedNext) {
+    ctx.fillStyle = NEON_COLORS.green;
+    ctx.fillText(`Level ${state.currentLevelNum + 1} Unlocked!`, centerX, statsY + lineHeight * 6.2);
+  } else if (state.currentLevelNum >= state.highestLevel) {
+    ctx.fillStyle = '#666';
+    ctx.fillText(`Need ${unlockThreshold} pts to unlock Level ${state.currentLevelNum + 1}`, centerX, statsY + lineHeight * 6.2);
+  }
 
   // Continue hint
   ctx.fillStyle = '#666666';
