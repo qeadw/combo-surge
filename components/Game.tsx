@@ -57,11 +57,11 @@ export default function Game() {
       alert('No save data found!');
       return;
     }
-    const blob = new Blob([saveData], { type: 'application/json' });
+    const blob = new Blob([saveData], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `combo-surge-save-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `combo-surge-save-${new Date().toISOString().split('T')[0]}.sav`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -73,8 +73,20 @@ export default function Game() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const data = JSON.parse(event.target?.result as string);
-        localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+        const saveData = event.target?.result as string;
+        // Validate it's an obfuscated save (starts with CS1:)
+        if (!saveData.startsWith('CS1:')) {
+          alert('Invalid save file format!');
+          return;
+        }
+
+        // Stop engine without saving to prevent overwrite
+        if (engineRef.current) {
+          engineRef.current.stop(true);
+          engineRef.current = null;
+        }
+
+        localStorage.setItem(SAVE_KEY, saveData);
         alert('Save imported successfully! Refreshing...');
         window.location.reload();
       } catch {
@@ -132,7 +144,7 @@ export default function Game() {
               </button>
               <label style={{ padding: '12px', background: '#49a', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', textAlign: 'center' }}>
                 📤 Import Save
-                <input type="file" accept=".json" onChange={importSave} style={{ display: 'none' }} />
+                <input type="file" accept=".sav" onChange={importSave} style={{ display: 'none' }} />
               </label>
               <button onClick={() => setShowSaveModal(false)} style={{ padding: '12px', background: '#666', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', marginTop: '10px' }}>
                 Close

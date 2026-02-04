@@ -130,12 +130,19 @@ export class GameEngine {
     this.gameLoop(this.lastTime);
   }
 
-  stop(): void {
+  private stopped: boolean = false;
+
+  stop(skipSave: boolean = false): void {
+    if (this.stopped) return;
+    this.stopped = true;
+
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
       this.animationId = 0;
     }
-    this.saveProgress();
+    if (!skipSave) {
+      this.saveProgress();
+    }
     window.removeEventListener('keydown', this.keyDownHandler);
     window.removeEventListener('keyup', this.keyUpHandler);
     this.canvas.removeEventListener('click', this.clickHandler);
@@ -673,6 +680,34 @@ export class GameEngine {
     }
   }
 
+  // Obfuscation helpers to discourage save editing
+  private static readonly SAVE_VERSION = 'CS1:';
+  private static readonly OBF_KEY = 'ComboSurge2024';
+
+  private obfuscate(data: string): string {
+    const key = GameEngine.OBF_KEY;
+    let result = '';
+    for (let i = 0; i < data.length; i++) {
+      result += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return GameEngine.SAVE_VERSION + btoa(result);
+  }
+
+  private deobfuscate(data: string): string {
+    // Handle legacy unobfuscated saves
+    if (!data.startsWith(GameEngine.SAVE_VERSION)) {
+      return data;
+    }
+    const encoded = data.slice(GameEngine.SAVE_VERSION.length);
+    const decoded = atob(encoded);
+    const key = GameEngine.OBF_KEY;
+    let result = '';
+    for (let i = 0; i < decoded.length; i++) {
+      result += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return result;
+  }
+
   private saveProgress(): void {
     try {
       const saveData: SaveData = {
@@ -683,7 +718,7 @@ export class GameEngine {
         levelMaxCombos: Array.from(this.state.levelMaxCombos.entries()),
         keybinds: this.state.keybinds,
       };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+      localStorage.setItem(SAVE_KEY, this.obfuscate(JSON.stringify(saveData)));
     } catch (e) {
       console.warn('Failed to save progress:', e);
     }
@@ -694,7 +729,7 @@ export class GameEngine {
       const saved = localStorage.getItem(SAVE_KEY);
       if (!saved) return;
 
-      const data: SaveData = JSON.parse(saved);
+      const data: SaveData = JSON.parse(this.deobfuscate(saved));
       this.state.totalPoints = data.totalPoints || 0;
       this.state.highestLevel = data.highestLevel || 1;
 
